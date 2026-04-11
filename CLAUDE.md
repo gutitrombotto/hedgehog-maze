@@ -131,6 +131,13 @@ Al crear o modificar niveles:
 - Los símbolos ocultos (14-17) solo en nivel 5
 - Progresión: niveles más grandes y más símbolos = más difícil
 
+## Deploy
+
+- Hosting: Vercel
+- URL de producción: https://hedgehog-maze.vercel.app
+- Deploy automático con `vercel --prod`
+- Vercel auto-detecta Vite (build command: `vite build`, output: `dist/`)
+
 ## Próximos pasos potenciales
 
 - Sonido/SFX al pisar símbolos, completar nivel, moverse
@@ -139,4 +146,3 @@ Al crear o modificar niveles:
 - Mobile: controles touch / swipe
 - Más niveles
 - Editor de niveles
-- Deploy (Vercel/Netlify)
