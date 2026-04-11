@@ -6,10 +6,9 @@ Hedgehog Maze — un puzzle-maze game web donde un erizo se mueve por una grilla
 
 ## Stack
 
-- React 18 + TypeScript
+- Phaser 3 (v3.90) + TypeScript
 - Vite 6
-- Sin librerías de estado externas (useState/useRef)
-- Sin librerías de UI (estilos inline)
+- Canvas/WebGL rendering (Phaser AUTO mode)
 - Desktop only (teclado, sin touch/mobile)
 
 ## Comandos
@@ -26,39 +25,49 @@ TypeScript strict mode activado. El build falla si hay errores de tipos.
 
 ```
 src/
-  main.tsx              # Entry point, monta App en #root
-  App.tsx               # Wrapper que renderiza HedgehogMaze
-  HedgehogMaze.tsx      # Orquestador: conecta hooks con componentes (~120 líneas)
-  index.css             # Estilos globales y keyframes
-  vite-env.d.ts         # Types de Vite
-  game/
-    types.ts            # Tipos del juego (Position, FlashMessage, ActiveMod, LevelDef, SquashPhase)
-    constants.ts        # Constantes de celdas, cooldowns, duraciones, HIDDEN_TYPES, SYMBOL_TYPES
-    levels.ts           # LEVELS array (data only, 5 niveles)
-    engine.ts           # Helpers puros: findCell, isBlocking, isSymbol, resolveHiddenType, formatTime, gridPixelPos, isNearPlayer
-  components/
-    Hedgehog.tsx        # SVG del erizo
-    SymbolIcon.tsx      # SVG de íconos de símbolos (swap, freeze, speed, invert, teleport)
-    Board.tsx           # Grilla + overlay del erizo + flash message + overlay nivel completado
-    HUD.tsx             # Header, selector de nivel, stats, mods activos, hint de inicio
-  hooks/
-    useGameState.ts     # Todo el estado del juego + loadLevel + handleSymbol + showFlash + efectos (timer, visual sync)
-    useKeyboard.ts      # handleKeyDown + listener de teclado
+  main.ts              # Entry point: new Phaser.Game(config)
+  config.ts            # Phaser.Game config (800x700, AUTO, Scale.FIT, scenes)
+  vite-env.d.ts        # Types de Vite
+  data/
+    types.ts           # Position, FlashMessage, ActiveMod, LevelDef, Direction
+    constants.ts       # Cell types, cooldowns, COLORS (hex numbers), CSS_COLORS, SCENE_KEYS, FONT_FAMILY
+    levels.ts          # LEVELS array (data only, 5 niveles)
+  utils/
+    engine.ts          # Helpers puros: findCell, isBlocking, isSymbol, resolveHiddenType, formatTime, isNearPlayer
+  scenes/
+    BootScene.ts       # Genera texturas programáticamente (hedgehog, symbols, stone, exit, start dot)
+    GameScene.ts       # Gameplay: grid, player, movement, input polling, symbols, teleports, level lifecycle
+    UIScene.ts         # HUD overlay: title, level selector, stats, mods, flash messages, level complete, legend
+  objects/
+    Player.ts          # Hedgehog sprite: moveTo() con tween + squash/stretch
+  systems/
+    GridManager.ts     # Builds grid from LevelDef, renders floor + overlays, markVisited, removeSymbol, hidden visibility
+    ModifierSystem.ts  # swap/freeze/speed/invert state, timers via time.delayedCall(), getActiveMods()
 public/
-  hedgehog.svg          # Favicon
+  hedgehog.svg         # Favicon
 ```
 
 ### Patrón de arquitectura
 
-- **`HedgehogMaze.tsx`** es un orquestador liviano: usa `useGameState` y `useKeyboard`, computa `activeMods`, renderiza `<HUD>` + `<Board>` + legend.
-- **`useGameState`** centraliza los 19 state variables, 6 refs, y las acciones (`loadLevel`, `handleSymbol`, `showFlash`). Retorna todo lo necesario para los componentes y `useKeyboard`.
-- **`useKeyboard`** recibe state/refs/actions como params, computa la nueva posición fuera del state updater, y llama `setPlayerPos` con un valor directo (no functional updater) para evitar side effects dentro de updaters.
-- **`game/`** contiene tipos, constantes, datos de niveles y funciones puras sin dependencia de React.
-- **`components/`** son componentes visuales que reciben props, sin lógica de estado propia.
+- **3 Phaser Scenes**: BootScene → GameScene + UIScene (launched in parallel)
+- **GameScene** es el core: tiene GridManager, ModifierSystem, Player. Maneja input polling en `update()`, movement, symbols, teleports, level load/complete.
+- **UIScene** es overlay de HUD: lee propiedades públicas de GameScene para updates de alta frecuencia (timer, moves). Escucha eventos para acciones discretas (levelLoaded, flash, levelComplete, modChanged).
+- **Comunicación**: UIScene → GameScene via `gameScene.events.emit("ui:selectLevel")` etc. GameScene → UIScene via events (`flash`, `levelComplete`, `modChanged`).
+- **`data/`** contiene tipos, constantes, datos de niveles — sin dependencia de Phaser.
+- **`utils/engine.ts`** tiene funciones puras de lógica de juego.
+- **`systems/`** encapsulan estado y lógica de subsistemas (grid, modifiers).
+- **`objects/`** son game objects con comportamiento (Player sprite).
 
-### Regla importante: no side effects en state updaters
+### Key Phaser patterns
 
-No llamar funciones con side effects (como `handleSymbol`, `setGrid`, `showFlash`) dentro de functional updaters de `setState`. React StrictMode en dev invoca los updaters dos veces, lo cual cancela toggles (`setSwapLR((v) => !v)` se ejecuta 2 veces = neto cero). Computar la nueva posición con el valor del state capturado en closure y llamar `setPlayerPos(newValue)` directamente.
+- Input: `cursors = input.keyboard.createCursorKeys()` + manual cooldown check in `update()`
+- Movement: `tweens.add({ targets: player, x, y, duration: 120 })`
+- Camera shake: `cameras.main.shake(200, 0.005)` on symbol pickup
+- Exit pulse: looping tween `yoyo: true, repeat: -1`
+- Flash message: tween on y + alpha
+- Hint blink: looping tween on alpha
+- Timers: `time.delayedCall()` for freeze/speed, `time.addEvent({ delay: 10, loop: true })` for game timer
+- Textures: all generated programmatically in BootScene via `add.renderTexture()` + `add.graphics()`
 
 ## Game Design Doc
 
@@ -104,31 +113,33 @@ Cada nivel acumula los obstáculos y símbolos de los anteriores.
 - Múltiples mutaciones pueden estar activas simultáneamente
 
 ### Feedback visual
-- Flash message animado al pisar un símbolo (texto + color del símbolo)
-- Pills/badges mostrando mutaciones activas sobre el tablero
-- La salida pulsa con animación
-- Texto parpadeante "Presioná una flecha para comenzar"
+- Flash message animado al pisar un símbolo (tween fadeUp)
+- Pills/badges mostrando mutaciones activas
+- La salida pulsa con tween yoyo
+- Texto parpadeante "Presioná una flecha para comenzar" (tween alpha blink)
+- Camera shake al pisar símbolos
+- Squash & stretch en el erizo al moverse
 - Overlay de nivel completado con tiempo, movimientos y opciones de reintentar/siguiente
 
 ## Convenciones de código
 
 - Idioma del código: inglés (nombres de variables, funciones, tipos, constantes)
 - Idioma de UI: español (textos visibles al usuario, nombres de niveles, mensajes)
-- Estilos: inline styles, sin CSS modules ni styled-components
-- Estado: hooks nativos de React, sin Redux/Zustand
-- Los niveles se definen como arrays 2D de números en `game/levels.ts`
-- Los tipos de celda son constantes numéricas exportadas desde `game/constants.ts` (no enums) por simplicidad de comparación en grids
-- Componentes SVG inline para el erizo (`Hedgehog.tsx`) y los íconos de símbolos (`SymbolIcon.tsx`)
-- Funciones puras de lógica de juego van en `game/engine.ts`
+- Estado: propiedades de instancia en Scenes, no React hooks
+- Los niveles se definen como arrays 2D de números en `data/levels.ts`
+- Los tipos de celda son constantes numéricas exportadas desde `data/constants.ts` (no enums)
+- Colores: `COLORS` object con hex numbers para Phaser, `CSS_COLORS` con strings para text styles
+- Texturas generadas programáticamente en BootScene (no archivos de imagen)
+- Funciones puras de lógica de juego van en `utils/engine.ts`
 
 ## Estética visual
 
 - Tema oscuro: fondo #1a1714, texto #e8dcc8
 - Tablero con estética de tierra/madera (muros #2a2522, camino #e8dcc8, piedras #8B7355)
-- Font: JetBrains Mono / SF Mono / Fira Code (monospace)
+- Font: JetBrains Mono (Google Fonts, loaded in index.html)
 - Colores de símbolos: púrpura (swap), azul (freeze), naranja (speed), rojo (invert), verde (teleport)
-- Sin librerías de animación — CSS keyframes puras
-- Erizo estilo PostHog: SVG simpático con púas triangulares, ojos redondos, nariz marrón
+- Animaciones via Phaser tweens
+- Erizo estilo PostHog: generado con Graphics (ellipses, triangles, circles)
 
 ## Diseño de niveles
 
@@ -152,7 +163,8 @@ Al crear o modificar niveles:
 
 - Sonido/SFX al pisar símbolos, completar nivel, moverse
 - Leaderboard local (localStorage)
-- Animación de movimiento del erizo (transición entre celdas)
 - Mobile: controles touch / swipe
 - Más niveles
 - Editor de niveles
+- Particle effects on symbol pickup
+- Screen transitions between levels
