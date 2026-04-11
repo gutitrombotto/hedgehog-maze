@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/HedgehogMaze.tsx","./src/main.tsx","./src/vite-env.d.ts"],"version":"5.6.3"}
+{"root":["./src/App.tsx","./src/HedgehogMaze.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/Board.tsx","./src/components/HUD.tsx","./src/components/Hedgehog.tsx","./src/components/SymbolIcon.tsx","./src/game/constants.ts","./src/game/engine.ts","./src/game/levels.ts","./src/game/types.ts","./src/hooks/useGameState.ts","./src/hooks/useKeyboard.ts"],"version":"5.6.3"}
