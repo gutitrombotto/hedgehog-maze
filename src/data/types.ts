@@ -20,4 +20,4 @@ export interface LevelDef {
   grid: number[][];
 }
 
-export type SquashPhase = "idle" | "stretch" | "squash";
+export type Direction = "up" | "down" | "left" | "right";

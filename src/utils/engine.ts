@@ -1,4 +1,4 @@
-import type { Position } from "./types";
+import type { Position } from "../data/types";
 import {
   WALL,
   STONE,
@@ -11,7 +11,7 @@ import {
   SPEED_X2,
   INVERT_ALL,
   SYMBOL_TYPES,
-} from "./constants";
+} from "../data/constants";
 
 export const findCell = (grid: number[][], type: number): Position | null => {
   for (let r = 0; r < grid.length; r++) {
@@ -42,8 +42,3 @@ export const formatTime = (ms: number): string => {
   const cs = Math.floor((ms % 1000) / 10);
   return `${m}:${String(s % 60).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 };
-
-export const gridPixelPos = (pos: Position, cellSize: number) => ({
-  x: pos.c * cellSize,
-  y: pos.r * cellSize,
-});
