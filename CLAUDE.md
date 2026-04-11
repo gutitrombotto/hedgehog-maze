@@ -26,30 +26,39 @@ TypeScript strict mode activado. El build falla si hay errores de tipos.
 
 ```
 src/
-  main.tsx           # Entry point, monta App en #root
-  App.tsx            # Wrapper que renderiza HedgehogMaze
-  HedgehogMaze.tsx   # Componente principal del juego (toda la lógica)
-  index.css          # Estilos globales y keyframes
-  vite-env.d.ts      # Types de Vite
-public/
-  hedgehog.svg       # Favicon
-```
-
-Actualmente es un solo componente monolítico (`HedgehogMaze.tsx`). Si se refactoriza, respetar esta estructura sugerida:
-
-```
-src/
-  components/        # Componentes visuales (Hedgehog, SymbolIcon, Board, etc.)
+  main.tsx              # Entry point, monta App en #root
+  App.tsx               # Wrapper que renderiza HedgehogMaze
+  HedgehogMaze.tsx      # Orquestador: conecta hooks con componentes (~120 líneas)
+  index.css             # Estilos globales y keyframes
+  vite-env.d.ts         # Types de Vite
   game/
-    types.ts         # Tipos del juego (Position, CellType, Level, etc.)
-    levels.ts        # Definición de niveles (grillas)
-    constants.ts     # Constantes (cooldowns, duraciones, cell types)
-    engine.ts        # Lógica de movimiento, colisiones, efectos
+    types.ts            # Tipos del juego (Position, FlashMessage, ActiveMod, LevelDef, SquashPhase)
+    constants.ts        # Constantes de celdas, cooldowns, duraciones, HIDDEN_TYPES, SYMBOL_TYPES
+    levels.ts           # LEVELS array (data only, 5 niveles)
+    engine.ts           # Helpers puros: findCell, isBlocking, isSymbol, resolveHiddenType, formatTime, gridPixelPos, isNearPlayer
+  components/
+    Hedgehog.tsx        # SVG del erizo
+    SymbolIcon.tsx      # SVG de íconos de símbolos (swap, freeze, speed, invert, teleport)
+    Board.tsx           # Grilla + overlay del erizo + flash message + overlay nivel completado
+    HUD.tsx             # Header, selector de nivel, stats, mods activos, hint de inicio
   hooks/
-    useGameState.ts  # Estado principal del juego
-    useKeyboard.ts   # Manejo de input del teclado
-    useTimer.ts      # Timer del nivel
+    useGameState.ts     # Todo el estado del juego + loadLevel + handleSymbol + showFlash + efectos (timer, visual sync)
+    useKeyboard.ts      # handleKeyDown + listener de teclado
+public/
+  hedgehog.svg          # Favicon
 ```
+
+### Patrón de arquitectura
+
+- **`HedgehogMaze.tsx`** es un orquestador liviano: usa `useGameState` y `useKeyboard`, computa `activeMods`, renderiza `<HUD>` + `<Board>` + legend.
+- **`useGameState`** centraliza los 19 state variables, 6 refs, y las acciones (`loadLevel`, `handleSymbol`, `showFlash`). Retorna todo lo necesario para los componentes y `useKeyboard`.
+- **`useKeyboard`** recibe state/refs/actions como params, computa la nueva posición fuera del state updater, y llama `setPlayerPos` con un valor directo (no functional updater) para evitar side effects dentro de updaters.
+- **`game/`** contiene tipos, constantes, datos de niveles y funciones puras sin dependencia de React.
+- **`components/`** son componentes visuales que reciben props, sin lógica de estado propia.
+
+### Regla importante: no side effects en state updaters
+
+No llamar funciones con side effects (como `handleSymbol`, `setGrid`, `showFlash`) dentro de functional updaters de `setState`. React StrictMode en dev invoca los updaters dos veces, lo cual cancela toggles (`setSwapLR((v) => !v)` se ejecuta 2 veces = neto cero). Computar la nueva posición con el valor del state capturado en closure y llamar `setPlayerPos(newValue)` directamente.
 
 ## Game Design Doc
 
@@ -107,9 +116,10 @@ Cada nivel acumula los obstáculos y símbolos de los anteriores.
 - Idioma de UI: español (textos visibles al usuario, nombres de niveles, mensajes)
 - Estilos: inline styles, sin CSS modules ni styled-components
 - Estado: hooks nativos de React, sin Redux/Zustand
-- Los niveles se definen como arrays 2D de números en la constante LEVELS
-- Los tipos de celda son constantes numéricas (no enums) por simplicidad de comparación en grids
-- Componentes SVG inline para el erizo y los íconos de símbolos
+- Los niveles se definen como arrays 2D de números en `game/levels.ts`
+- Los tipos de celda son constantes numéricas exportadas desde `game/constants.ts` (no enums) por simplicidad de comparación en grids
+- Componentes SVG inline para el erizo (`Hedgehog.tsx`) y los íconos de símbolos (`SymbolIcon.tsx`)
+- Funciones puras de lógica de juego van en `game/engine.ts`
 
 ## Estética visual
 
