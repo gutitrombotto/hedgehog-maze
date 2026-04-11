@@ -6,8 +6,8 @@ import { COLORS } from "./data/constants";
 
 export const gameConfig: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 700,
+  width: 1100,
+  height: 750,
   parent: "game-container",
   backgroundColor: COLORS.BG,
   scale: {

@@ -7,12 +7,26 @@ import {
   TELEPORT_B,
   START,
   SCENE_KEYS,
+  LAYOUT,
+  SWAP_DIR,
+  FREEZE,
+  SPEED_X2,
+  INVERT_ALL,
+  COLORS,
 } from "../data/constants";
 import { LEVELS } from "../data/levels";
-import { findCell, isBlocking, isSymbol } from "../utils/engine";
+import { findCell, isBlocking, isSymbol, resolveHiddenType } from "../utils/engine";
 import { GridManager } from "../systems/GridManager";
 import { ModifierSystem } from "../systems/ModifierSystem";
 import { Player } from "../objects/Player";
+
+/** Map resolved symbol type → particle tint color */
+const SYMBOL_PARTICLE_COLORS: Record<number, number> = {
+  [SWAP_DIR]: 0x7f77dd,
+  [FREEZE]: 0x378add,
+  [SPEED_X2]: 0xd85a30,
+  [INVERT_ALL]: 0xe24b4a,
+};
 
 export class GameScene extends Phaser.Scene {
   gridManager!: GridManager;
@@ -35,6 +49,9 @@ export class GameScene extends Phaser.Scene {
   private timerEvent: Phaser.Time.TimerEvent | null = null;
   lastDir: Direction = "down";
 
+  // Particle emitters
+  private symbolBurstEmitter: Phaser.GameObjects.Particles.ParticleEmitter | null = null;
+
   constructor() {
     super({ key: SCENE_KEYS.GAME });
   }
@@ -45,6 +62,18 @@ export class GameScene extends Phaser.Scene {
 
     // Dummy player, will be placed in loadLevel
     this.player = new Player(this, -100, -100, 40);
+
+    // Create particle emitter for symbol burst (reusable)
+    this.symbolBurstEmitter = this.add.particles(0, 0, "particle", {
+      speed: { min: 40, max: 120 },
+      scale: { start: 0.6, end: 0 },
+      alpha: { start: 0.9, end: 0 },
+      lifespan: 500,
+      gravityY: 60,
+      emitting: false,
+      quantity: 12,
+    });
+    this.symbolBurstEmitter.setDepth(8);
 
     this.cursors = this.input.keyboard!.createCursorKeys();
 
@@ -72,12 +101,26 @@ export class GameScene extends Phaser.Scene {
 
     this.events.on("modChanged", () => {
       // UIScene will pick up changes on next update
+      // Stop speed trail if speed x2 is no longer active
+      if (!this.modifiers.speedX2) {
+        this.player.stopSpeedTrail();
+      }
     });
   }
 
   update() {
     if (this.levelComplete) return;
     this.pollInput();
+  }
+
+  /** Board center X for UI positioning */
+  get boardCenterX(): number {
+    return this.gridManager.boardX + this.gridManager.boardPixelSize / 2;
+  }
+
+  /** Board center Y for UI positioning */
+  get boardCenterY(): number {
+    return this.gridManager.boardY + this.gridManager.boardPixelSize / 2;
   }
 
   loadLevel(levelIdx: number) {
@@ -101,12 +144,17 @@ export class GameScene extends Phaser.Scene {
       this.timerEvent = null;
     }
 
-    // Board positioning: centered horizontally, pushed down to make room for HUD
-    const boardPixelSize = level.size * Math.min(Math.floor(520 / level.size), 44);
-    const offsetX = (800 - boardPixelSize) / 2;
-    const offsetY = 210;
+    // Board positioning: left side of canvas, vertically centered
+    const maxBoardPx = LAYOUT.BOARD_AREA_W - LAYOUT.BOARD_MARGIN * 2;
+    const cellSize = Math.min(Math.floor(maxBoardPx / level.size), 44);
+    const boardPixelSize = level.size * cellSize;
+    const offsetX = Math.floor((LAYOUT.BOARD_AREA_W - boardPixelSize) / 2);
+    const offsetY = Math.floor((LAYOUT.CANVAS_H - boardPixelSize) / 2);
 
     this.gridManager.buildGrid(level, offsetX, offsetY);
+
+    // Reset speed trail on player
+    this.player.stopSpeedTrail();
 
     // Find start
     const start = findCell(this.gridManager.grid, START) || { r: 1, c: 1 };
@@ -199,13 +247,42 @@ export class GameScene extends Phaser.Scene {
 
     // Handle symbols
     if (isSymbol(cell)) {
+      const worldPos = this.gridManager.cellToWorld(nr, nc);
+
+      // Particle burst at symbol position
+      const resolved = resolveHiddenType(cell);
+      const tintColor = SYMBOL_PARTICLE_COLORS[resolved] ?? COLORS.TEXT;
+      this.emitSymbolBurst(worldPos.x, worldPos.y, tintColor);
+
       const result = this.modifiers.handleSymbol(cell);
       this.gridManager.grid[nr][nc] = EMPTY;
       this.gridManager.removeSymbol(nr, nc);
       this.events.emit("flash", result.text, result.color);
       this.events.emit("modChanged");
-      // Camera shake
-      this.cameras.main.shake(200, 0.005);
+
+      // Brief glow flash on player on symbol pickup
+      try {
+        const glow = this.player.preFX?.addGlow(tintColor, 6, 0, false, 0.2, 10);
+        if (glow) {
+          this.tweens.add({
+            targets: glow,
+            outerStrength: 0,
+            duration: 400,
+            ease: "Power2",
+            onComplete: () => {
+              this.player.preFX?.remove(glow);
+            },
+          });
+        }
+      } catch (_e) { /* preFX not available */ }
+
+      // Camera shake — smoother with custom tween
+      this.cameras.main.shake(180, 0.003);
+
+      // Handle speed trail
+      if (resolved === SPEED_X2 && this.modifiers.speedX2) {
+        this.player.startSpeedTrail(this);
+      }
     }
 
     // Handle teleports
@@ -220,6 +297,13 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.movePlayerTo(nr, nc, effectiveDir, false);
+  }
+
+  private emitSymbolBurst(x: number, y: number, tint: number) {
+    if (this.symbolBurstEmitter) {
+      this.symbolBurstEmitter.setParticleTint(tint);
+      this.symbolBurstEmitter.emitParticleAt(x, y, 12);
+    }
   }
 
   private movePlayerTo(r: number, c: number, dir: Direction, skipTransition: boolean) {

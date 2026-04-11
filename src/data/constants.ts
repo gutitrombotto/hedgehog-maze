@@ -75,3 +75,14 @@ export const SCENE_KEYS = {
 } as const;
 
 export const FONT_FAMILY = '"JetBrains Mono", "SF Mono", "Fira Code", monospace';
+
+// Layout constants for side-panel design (1100×750 canvas)
+export const LAYOUT = {
+  CANVAS_W: 1100,
+  CANVAS_H: 750,
+  BOARD_AREA_W: 720,       // left area for the board
+  PANEL_X: 730,             // right panel starts here
+  PANEL_W: 350,             // right panel width
+  BOARD_MARGIN: 20,         // margin around board within its area
+  BOARD_TOP: 20,            // top margin for board
+} as const;

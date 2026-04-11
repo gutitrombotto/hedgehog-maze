@@ -26,22 +26,22 @@ TypeScript strict mode activado. El build falla si hay errores de tipos.
 ```
 src/
   main.ts              # Entry point: new Phaser.Game(config)
-  config.ts            # Phaser.Game config (800x700, AUTO, Scale.FIT, scenes)
+  config.ts            # Phaser.Game config (1100x750, AUTO, Scale.FIT, scenes)
   vite-env.d.ts        # Types de Vite
   data/
     types.ts           # Position, FlashMessage, ActiveMod, LevelDef, Direction
-    constants.ts       # Cell types, cooldowns, COLORS (hex numbers), CSS_COLORS, SCENE_KEYS, FONT_FAMILY
+    constants.ts       # Cell types, cooldowns, COLORS (hex numbers), CSS_COLORS, SCENE_KEYS, FONT_FAMILY, LAYOUT (side-panel dimensions)
     levels.ts          # LEVELS array (data only, 5 niveles)
   utils/
     engine.ts          # Helpers puros: findCell, isBlocking, isSymbol, resolveHiddenType, formatTime, isNearPlayer
   scenes/
-    BootScene.ts       # Genera texturas programáticamente (hedgehog, symbols, stone, exit, start dot)
-    GameScene.ts       # Gameplay: grid, player, movement, input polling, symbols, teleports, level lifecycle
-    UIScene.ts         # HUD overlay: title, level selector, stats, mods, flash messages, level complete, legend
+    BootScene.ts       # Genera texturas programáticamente (hedgehog, symbols, stone, exit, exit ring, start dot, particle, spark)
+    GameScene.ts       # Gameplay: grid, player, movement, input polling, symbols, teleports, level lifecycle, particle effects, glow FX
+    UIScene.ts         # HUD side-panel: title, level selector, stats, mods, flash messages, level complete overlay, legend
   objects/
-    Player.ts          # Hedgehog sprite: moveTo() con tween + squash/stretch
+    Player.ts          # Hedgehog sprite: moveTo() con tween + squash/stretch, speed x2 particle trail
   systems/
-    GridManager.ts     # Builds grid from LevelDef, renders floor + overlays, markVisited, removeSymbol, hidden visibility
+    GridManager.ts     # Builds grid from LevelDef, renders floor + overlays with visual effects (bevels, shadows, vignette, glow), markVisited, removeSymbol, hidden visibility
     ModifierSystem.ts  # swap/freeze/speed/invert state, timers via time.delayedCall(), getActiveMods()
 public/
   hedgehog.svg         # Favicon
@@ -51,7 +51,7 @@ public/
 
 - **3 Phaser Scenes**: BootScene → GameScene + UIScene (launched in parallel)
 - **GameScene** es el core: tiene GridManager, ModifierSystem, Player. Maneja input polling en `update()`, movement, symbols, teleports, level load/complete.
-- **UIScene** es overlay de HUD: lee propiedades públicas de GameScene para updates de alta frecuencia (timer, moves). Escucha eventos para acciones discretas (levelLoaded, flash, levelComplete, modChanged).
+- **UIScene** es side-panel HUD (derecha): lee propiedades públicas de GameScene para updates de alta frecuencia (timer, moves). Escucha eventos para acciones discretas (levelLoaded, flash, levelComplete, modChanged).
 - **Comunicación**: UIScene → GameScene via `gameScene.events.emit("ui:selectLevel")` etc. GameScene → UIScene via events (`flash`, `levelComplete`, `modChanged`).
 - **`data/`** contiene tipos, constantes, datos de niveles — sin dependencia de Phaser.
 - **`utils/engine.ts`** tiene funciones puras de lógica de juego.
@@ -62,8 +62,12 @@ public/
 
 - Input: `cursors = input.keyboard.createCursorKeys()` + manual cooldown check in `update()`
 - Movement: `tweens.add({ targets: player, x, y, duration: 120 })`
-- Camera shake: `cameras.main.shake(200, 0.005)` on symbol pickup
-- Exit pulse: looping tween `yoyo: true, repeat: -1`
+- Camera shake: `cameras.main.shake(180, 0.003)` on symbol pickup
+- Exit pulse: looping tween `yoyo: true, repeat: -1` + preFX glow pulse + rotating ring halo
+- Particle burst: `add.particles()` emitter on symbol consumption (colored by symbol type)
+- Speed trail: orange spark particles following player while speed x2 active
+- Glow FX: `preFX.addGlow()` on exit (golden pulse) + brief flash on player at pickup
+- Vignette: subtle edge darkening on board via gradient graphics
 - Flash message: tween on y + alpha
 - Hint blink: looping tween on alpha
 - Timers: `time.delayedCall()` for freeze/speed, `time.addEvent({ delay: 10, loop: true })` for game timer
