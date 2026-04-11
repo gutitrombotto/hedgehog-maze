@@ -189,6 +189,11 @@ const formatTime = (ms: number): string => {
   return `${m}:${String(s % 60).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 };
 
+const gridPixelPos = (pos: Position, cellSize: number) => ({
+  x: pos.c * cellSize,
+  y: pos.r * cellSize,
+});
+
 // --- Sub-components ---
 const Hedgehog = ({ size }: { size: number }) => (
   <svg viewBox="0 0 100 100" width={size * 0.8} height={size * 0.8}>
@@ -275,17 +280,24 @@ export default function HedgehogMaze() {
   const [speedX2, setSpeedX2] = useState(false);
   const [flash, setFlash] = useState<FlashMessage | null>(null);
   const [moveCount, setMoveCount] = useState(0);
+  const [visualPos, setVisualPos] = useState({ x: 0, y: 0 });
+  const [visited, setVisited] = useState<Set<string>>(new Set());
+  const [shaking, setShaking] = useState(false);
+  const [squashPhase, setSquashPhase] = useState<"idle" | "stretch" | "squash">("idle");
   const lastMove = useRef(0);
   const freezeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gameRef = useRef<HTMLDivElement>(null);
+  const skipTransition = useRef(false);
+  const moveDir = useRef<string | null>(null);
 
   const loadLevel = useCallback((levelIdx: number) => {
     const level = LEVELS[levelIdx];
     const newGrid = level.grid.map((row) => [...row]);
-    const start = findCell(newGrid, START);
+    const start = findCell(newGrid, START) || { r: 1, c: 1 };
+    const cs = Math.min(Math.floor(520 / level.size), 44);
     setGrid(newGrid);
-    setPlayerPos(start || { r: 1, c: 1 });
+    setPlayerPos(start);
     setTimer(0);
     setIsRunning(false);
     setGameStarted(false);
@@ -296,6 +308,11 @@ export default function HedgehogMaze() {
     setSpeedX2(false);
     setFlash(null);
     setMoveCount(0);
+    setVisited(new Set());
+    setShaking(false);
+    setSquashPhase("idle");
+    skipTransition.current = true;
+    setVisualPos(gridPixelPos(start, cs));
     if (freezeTimer.current) clearTimeout(freezeTimer.current);
     if (speedTimer.current) clearTimeout(speedTimer.current);
   }, []);
@@ -311,6 +328,34 @@ export default function HedgehogMaze() {
     }
     return () => clearInterval(interval);
   }, [isRunning, levelComplete]);
+
+  // Sync visual position from logical position
+  useEffect(() => {
+    const cs = Math.min(Math.floor(520 / LEVELS[currentLevel].size), 44);
+    setVisualPos(gridPixelPos(playerPos, cs));
+    setVisited((prev) => {
+      const key = `${playerPos.r},${playerPos.c}`;
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+
+    if (skipTransition.current) {
+      setSquashPhase("idle");
+      requestAnimationFrame(() => {
+        skipTransition.current = false;
+      });
+    } else {
+      setSquashPhase("stretch");
+      const t1 = setTimeout(() => setSquashPhase("squash"), 120);
+      const t2 = setTimeout(() => setSquashPhase("idle"), 200);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, [playerPos, currentLevel]);
 
   const showFlash = (text: string, color: string) => {
     setFlash({ text, color });
@@ -336,6 +381,8 @@ export default function HedgehogMaze() {
       setInvertAll((v) => !v);
       showFlash("Controles invertidos", "#E24B4A");
     }
+    setShaking(true);
+    setTimeout(() => setShaking(false), 200);
   }, []);
 
   const handleKeyDown = useCallback(
@@ -366,6 +413,8 @@ export default function HedgehogMaze() {
         else if (dir === "ArrowUp") dir = "ArrowDown";
         else if (dir === "ArrowDown") dir = "ArrowUp";
       }
+
+      moveDir.current = dir;
 
       setPlayerPos((pos) => {
         let nr = pos.r;
@@ -400,6 +449,7 @@ export default function HedgehogMaze() {
         if (cell === TELEPORT_A) {
           const dest = findCell(grid, TELEPORT_B);
           if (dest) {
+            skipTransition.current = true;
             showFlash("Teletransporte", "#1D9E75");
             return dest;
           }
@@ -407,6 +457,7 @@ export default function HedgehogMaze() {
         if (cell === TELEPORT_B) {
           const dest = findCell(grid, TELEPORT_A);
           if (dest) {
+            skipTransition.current = true;
             showFlash("Teletransporte", "#1D9E75");
             return dest;
           }
@@ -429,6 +480,16 @@ export default function HedgehogMaze() {
 
   const level = LEVELS[currentLevel];
   const cellSize = Math.min(Math.floor(520 / level.size), 44);
+
+  const getSquashStretch = (): string => {
+    const dir = moveDir.current;
+    const horiz = dir === "ArrowLeft" || dir === "ArrowRight";
+    if (squashPhase === "stretch") return horiz ? "scale(1.15, 0.87)" : "scale(0.87, 1.15)";
+    if (squashPhase === "squash") return horiz ? "scale(0.9, 1.1)" : "scale(1.1, 0.9)";
+    return "scale(1, 1)";
+  };
+
+  const boardPixelSize = level.size * cellSize;
 
   const activeMods: ActiveMod[] = [];
   if (swapLR) activeMods.push({ label: "Izq ↔ Der", color: "#7F77DD" });
@@ -518,182 +579,213 @@ export default function HedgehogMaze() {
       )}
 
       {/* Game board */}
-      <div style={{ display: "flex", justifyContent: "center", position: "relative" }}>
+      <div style={{ display: "flex", justifyContent: "center" }}>
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${level.size}, ${cellSize}px)`,
-            gridTemplateRows: `repeat(${level.size}, ${cellSize}px)`,
-            border: "2px solid #4a433b",
-            borderRadius: 8,
-            overflow: "hidden",
-            background: "#3d3832",
-            boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+            position: "relative",
+            width: boardPixelSize + 4,
+            height: boardPixelSize + 4,
+            animation: shaking ? "shake 200ms ease-in-out" : "none",
           }}
         >
-          {grid.map((row, r) =>
-            row.map((cell, c) => {
-              const isPlayer = playerPos.r === r && playerPos.c === c;
-              const isExit = cell === EXIT;
-              const isStart = cell === START;
-              const isTeleport = cell === TELEPORT_A || cell === TELEPORT_B;
-              const showSymbol = isSymbol(cell) || isTeleport;
-              const near = isNearPlayer(playerPos.r, playerPos.c, r, c);
-
-              let bg = "#e8dcc8";
-              if (cell === WALL) bg = "#2a2522";
-              if (cell === STONE) bg = "#8B7355";
-
-              return (
-                <div
-                  key={`${r}-${c}`}
-                  style={{
-                    width: cellSize,
-                    height: cellSize,
-                    background: bg,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    position: "relative",
-                    borderRight: cell !== WALL ? "0.5px solid #d4c9b5" : "none",
-                    borderBottom: cell !== WALL ? "0.5px solid #d4c9b5" : "none",
-                  }}
-                >
-                  {cell === STONE && (
-                    <div
-                      style={{
-                        width: cellSize * 0.7,
-                        height: cellSize * 0.7,
-                        borderRadius: "40%",
-                        background: "radial-gradient(circle at 35% 35%, #a08c6e, #6b5c44)",
-                        boxShadow: "inset -2px -2px 4px rgba(0,0,0,0.3)",
-                      }}
-                    />
-                  )}
-                  {isExit && (
-                    <div
-                      style={{
-                        width: cellSize * 0.7,
-                        height: cellSize * 0.7,
-                        borderRadius: "50%",
-                        background: "#EF9F27",
-                        boxShadow: "0 0 12px #EF9F2788",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        animation: "pulse 2s infinite",
-                      }}
-                    >
-                      <span style={{ fontSize: cellSize * 0.35, fontWeight: 700, color: "#412402" }}>S</span>
-                    </div>
-                  )}
-                  {showSymbol && !isPlayer && (
-                    <SymbolIcon type={cell} size={cellSize} nearPlayer={near} />
-                  )}
-                  {isPlayer && <Hedgehog size={cellSize} />}
-                  {isStart && !isPlayer && (
-                    <div
-                      style={{
-                        width: cellSize * 0.3,
-                        height: cellSize * 0.3,
-                        borderRadius: "50%",
-                        background: "#5DCAA5",
-                        opacity: 0.4,
-                      }}
-                    />
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Flash message */}
-        {flash && (
           <div
             style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              background: flash.color + "dd",
-              color: "white",
-              padding: "10px 24px",
+              display: "grid",
+              gridTemplateColumns: `repeat(${level.size}, ${cellSize}px)`,
+              gridTemplateRows: `repeat(${level.size}, ${cellSize}px)`,
+              border: "2px solid #4a433b",
               borderRadius: 8,
-              fontSize: 16,
-              fontWeight: 700,
-              pointerEvents: "none",
-              animation: "fadeUp 1.5s forwards",
-              zIndex: 10,
-              whiteSpace: "nowrap",
+              overflow: "hidden",
+              background: "#3d3832",
+              boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
             }}
           >
-            {flash.text}
-          </div>
-        )}
+            {grid.map((row, r) =>
+              row.map((cell, c) => {
+                const isExit = cell === EXIT;
+                const isStart = cell === START;
+                const isTeleport = cell === TELEPORT_A || cell === TELEPORT_B;
+                const showSymbol = isSymbol(cell) || isTeleport;
+                const near = isNearPlayer(playerPos.r, playerPos.c, r, c);
+                const isVisited = visited.has(`${r},${c}`);
 
-        {/* Level complete overlay */}
-        {levelComplete && (
+                let bg = "#e8dcc8";
+                if (cell === WALL) bg = "#2a2522";
+                else if (cell === STONE) bg = "#8B7355";
+                else if (isVisited) bg = "#d8d0b0";
+
+                return (
+                  <div
+                    key={`${r}-${c}`}
+                    style={{
+                      width: cellSize,
+                      height: cellSize,
+                      background: bg,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      position: "relative",
+                      borderRight: cell !== WALL ? "0.5px solid #d4c9b5" : "none",
+                      borderBottom: cell !== WALL ? "0.5px solid #d4c9b5" : "none",
+                    }}
+                  >
+                    {cell === STONE && (
+                      <div
+                        style={{
+                          width: cellSize * 0.7,
+                          height: cellSize * 0.7,
+                          borderRadius: "40%",
+                          background: "radial-gradient(circle at 35% 35%, #a08c6e, #6b5c44)",
+                          boxShadow: "inset -2px -2px 4px rgba(0,0,0,0.3)",
+                        }}
+                      />
+                    )}
+                    {isExit && (
+                      <div
+                        style={{
+                          width: cellSize * 0.7,
+                          height: cellSize * 0.7,
+                          borderRadius: "50%",
+                          background: "#EF9F27",
+                          boxShadow: "0 0 12px #EF9F2788",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          animation: "pulse 2s infinite",
+                        }}
+                      >
+                        <span style={{ fontSize: cellSize * 0.35, fontWeight: 700, color: "#412402" }}>S</span>
+                      </div>
+                    )}
+                    {showSymbol && (
+                      <SymbolIcon type={cell} size={cellSize} nearPlayer={near} />
+                    )}
+                    {isStart && !(playerPos.r === r && playerPos.c === c) && (
+                      <div
+                        style={{
+                          width: cellSize * 0.3,
+                          height: cellSize * 0.3,
+                          borderRadius: "50%",
+                          background: "#5DCAA5",
+                          opacity: 0.4,
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Hedgehog overlay */}
           <div
             style={{
               position: "absolute",
-              inset: 0,
+              top: 2,
+              left: 2,
+              width: cellSize,
+              height: cellSize,
+              transform: `translate(${visualPos.x}px, ${visualPos.y}px)`,
+              transition: skipTransition.current ? "none" : "transform 120ms ease-out",
+              zIndex: 5,
+              pointerEvents: "none",
               display: "flex",
-              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              background: "rgba(0,0,0,0.7)",
-              borderRadius: 8,
-              zIndex: 20,
             }}
           >
-            <div style={{ fontSize: 32, fontWeight: 700, color: "#EF9F27", marginBottom: 4 }}>
-              Nivel completado
+            <div style={{ transform: getSquashStretch(), transition: "transform 80ms ease-out" }}>
+              <Hedgehog size={cellSize} />
             </div>
-            <div style={{ fontSize: 20, color: "white", marginBottom: 4 }}>
-              {formatTime(timer)}
+          </div>
+
+          {/* Flash message */}
+          {flash && (
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                background: flash.color + "dd",
+                color: "white",
+                padding: "10px 24px",
+                borderRadius: 8,
+                fontSize: 16,
+                fontWeight: 700,
+                pointerEvents: "none",
+                animation: "fadeUp 1.5s forwards",
+                zIndex: 10,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {flash.text}
             </div>
-            <div style={{ fontSize: 14, color: "#ccc", marginBottom: 16 }}>
-              {moveCount} movimientos
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => loadLevel(currentLevel)}
-                style={{
-                  padding: "8px 20px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  background: "transparent",
-                  color: "white",
-                  border: "1px solid rgba(255,255,255,0.4)",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                Reintentar
-              </button>
-              {currentLevel < LEVELS.length - 1 && (
+          )}
+
+          {/* Level complete overlay */}
+          {levelComplete && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "rgba(0,0,0,0.7)",
+                borderRadius: 8,
+                zIndex: 20,
+              }}
+            >
+              <div style={{ fontSize: 32, fontWeight: 700, color: "#EF9F27", marginBottom: 4 }}>
+                Nivel completado
+              </div>
+              <div style={{ fontSize: 20, color: "white", marginBottom: 4 }}>
+                {formatTime(timer)}
+              </div>
+              <div style={{ fontSize: 14, color: "#ccc", marginBottom: 16 }}>
+                {moveCount} movimientos
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
                 <button
-                  onClick={() => setCurrentLevel((l) => l + 1)}
+                  onClick={() => loadLevel(currentLevel)}
                   style={{
                     padding: "8px 20px",
                     fontSize: 13,
                     fontWeight: 600,
-                    background: "#EF9F27",
-                    color: "#412402",
-                    border: "none",
+                    background: "transparent",
+                    color: "white",
+                    border: "1px solid rgba(255,255,255,0.4)",
                     borderRadius: 6,
                     cursor: "pointer",
                     fontFamily: "inherit",
                   }}
                 >
-                  Siguiente nivel →
+                  Reintentar
                 </button>
-              )}
+                {currentLevel < LEVELS.length - 1 && (
+                  <button
+                    onClick={() => setCurrentLevel((l) => l + 1)}
+                    style={{
+                      padding: "8px 20px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      background: "#EF9F27",
+                      color: "#412402",
+                      border: "none",
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Siguiente nivel →
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Start hint */}
