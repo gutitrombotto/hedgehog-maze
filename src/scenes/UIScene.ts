@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { SCENE_KEYS, FONT_FAMILY, CSS_COLORS, LAYOUT } from "../data/constants";
-import { LEVELS } from "../data/levels";
+import { TOTAL_LEVELS, generateTier } from "../data/MazeGenerator";
 import { formatTime } from "../utils/engine";
 import type { GameScene } from "./GameScene";
 
@@ -20,6 +20,7 @@ export class UIScene extends Phaser.Scene {
   private flashBg: Phaser.GameObjects.Rectangle | null = null;
   private completeOverlay: Phaser.GameObjects.Container | null = null;
   private panelBg!: Phaser.GameObjects.Graphics;
+  private seedText!: Phaser.GameObjects.Text;
 
   // Panel positioning
   private panelX = LAYOUT.PANEL_X;
@@ -83,11 +84,43 @@ export class UIScene extends Phaser.Scene {
       wordWrap: { width: LAYOUT.PANEL_W - 40 },
     }).setOrigin(0.5, 0);
 
+    // Seed row
+    const seedY = 258;
+    this.add.text(this.panelCenterX - 50, seedY, "Semilla:", {
+      fontFamily: FONT_FAMILY,
+      fontSize: "11px",
+      color: CSS_COLORS.DARK_MUTED,
+    }).setOrigin(1, 0.5);
+
+    this.seedText = this.add.text(this.panelCenterX - 42, seedY, "", {
+      fontFamily: FONT_FAMILY,
+      fontSize: "12px",
+      color: CSS_COLORS.TEXT,
+      fontStyle: "bold",
+    }).setOrigin(0, 0.5);
+
+    // "Nueva" button
+    const newSeedBtnBg = this.add.rectangle(this.panelCenterX + 62, seedY, 64, 20, 0x2a2522)
+      .setStrokeStyle(1, 0x3d3832);
+    this.add.text(this.panelCenterX + 62, seedY, "↻ Nueva", {
+      fontFamily: FONT_FAMILY,
+      fontSize: "11px",
+      color: CSS_COLORS.MUTED,
+      fontStyle: "bold",
+    }).setOrigin(0.5);
+    const newSeedHit = this.add.rectangle(this.panelCenterX + 62, seedY, 64, 20, 0x000000, 0);
+    newSeedHit.setInteractive({ useHandCursor: true });
+    newSeedHit.on("pointerdown", () => {
+      this.gameScene.events.emit("ui:newSeed");
+    });
+    newSeedHit.on("pointerover", () => newSeedBtnBg.setStrokeStyle(1, 0x6b6258));
+    newSeedHit.on("pointerout", () => newSeedBtnBg.setStrokeStyle(1, 0x3d3832));
+
     // Separator
-    this.drawSeparator(258);
+    this.drawSeparator(278);
 
     // Stats section
-    const statsY = 275;
+    const statsY = 295;
 
     this.add.text(this.panelX + 20, statsY, "Tiempo", {
       fontFamily: FONT_FAMILY,
@@ -116,10 +149,10 @@ export class UIScene extends Phaser.Scene {
     }).setOrigin(1, 0);
 
     // Separator
-    this.drawSeparator(325);
+    this.drawSeparator(345);
 
     // Active modifiers section header
-    this.add.text(this.panelX + 20, 338, "Mutaciones activas", {
+    this.add.text(this.panelX + 20, 358, "Mutaciones activas", {
       fontFamily: FONT_FAMILY,
       fontSize: "11px",
       color: CSS_COLORS.DARK_MUTED,
@@ -207,7 +240,7 @@ export class UIScene extends Phaser.Scene {
     const totalRowWidth = cols * btnWidth + (cols - 1) * gap;
     const startX = this.panelCenterX - totalRowWidth / 2;
 
-    for (let i = 0; i < LEVELS.length; i++) {
+    for (let i = 0; i < TOTAL_LEVELS; i++) {
       const isActive = i === this.gameScene.currentLevel;
       const col = i % cols;
       const row = Math.floor(i / cols);
@@ -257,9 +290,10 @@ export class UIScene extends Phaser.Scene {
   }
 
   private onLevelLoaded(idx: number) {
-    const level = LEVELS[idx];
+    const level = generateTier(idx + 1, this.gameScene.currentSeed);
     this.levelNameText.setText(level.name);
     this.levelSubtitleText.setText(level.subtitle);
+    this.seedText.setText(this.gameScene.currentSeed);
 
     // Update button styles
     for (let i = 0; i < this.levelButtons.length; i++) {
@@ -345,7 +379,7 @@ export class UIScene extends Phaser.Scene {
     const mods = this.gameScene.modifiers.getActiveMods();
     if (mods.length === 0) return;
 
-    const startY = 358;
+    const startY = 378;
     const pillHeight = 24;
     const gap = 4;
 
@@ -440,7 +474,7 @@ export class UIScene extends Phaser.Scene {
 
     const items: Phaser.GameObjects.GameObject[] = [overlay, title, decor, timeText, movesText, retryBg, retryLabel, retryHit];
 
-    if (this.gameScene.currentLevel < LEVELS.length - 1) {
+    if (this.gameScene.currentLevel < TOTAL_LEVELS - 1) {
       const nextBg = this.add.rectangle(75, 0, 140, 34, 0xef9f27)
         .setDepth(21);
       const nextLabel = this.add.text(75, 0, "Siguiente nivel →", {
