@@ -14,7 +14,7 @@ import {
   INVERT_ALL,
   COLORS,
 } from "../data/constants";
-import { LEVELS } from "../data/levels";
+import { generateTier, randomSeed, TOTAL_LEVELS } from "../data/MazeGenerator";
 import { findCell, isBlocking, isSymbol, resolveHiddenType } from "../utils/engine";
 import { GridManager } from "../systems/GridManager";
 import { ModifierSystem } from "../systems/ModifierSystem";
@@ -36,6 +36,7 @@ export class GameScene extends Phaser.Scene {
 
   // Public state (read by UIScene)
   currentLevel = 0;
+  currentSeed: string = randomSeed();
   playerPos: Position = { r: 0, c: 0 };
   timer = 0;
   isRunning = false;
@@ -93,10 +94,15 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.events.on("ui:nextLevel", () => {
-      if (this.currentLevel < LEVELS.length - 1) {
+      if (this.currentLevel < TOTAL_LEVELS - 1) {
         this.currentLevel++;
         this.loadLevel(this.currentLevel);
       }
+    });
+
+    this.events.on("ui:newSeed", () => {
+      this.currentSeed = randomSeed();
+      this.loadLevel(this.currentLevel);
     });
 
     this.events.on("modChanged", () => {
@@ -125,7 +131,7 @@ export class GameScene extends Phaser.Scene {
 
   loadLevel(levelIdx: number) {
     this.currentLevel = levelIdx;
-    const level = LEVELS[levelIdx];
+    const level = generateTier(levelIdx + 1, this.currentSeed);
 
     // Reset state
     this.modifiers.reset();
